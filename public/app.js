@@ -15,14 +15,72 @@ const docsIdentifiedEl = document.getElementById('docs-identified');
 const docsScannedEl = document.getElementById('docs-scanned');
 const statusFillEl = document.getElementById('status-fill');
 const lastRunEl = document.getElementById('last-run');
+const errorBanner = document.getElementById('error-banner');
 
 let currentRunId = null;
 let pollTimer = null;
 let hasLatestResults = false;
+let apiBase = null;
+let apiBases = null;
+
+function resolveApiBase() {
+  const origin = window.location.origin;
+  let basePath = window.location.pathname || '/';
+  if (!basePath.endsWith('/')) {
+    if (basePath.includes('.')) {
+      basePath = basePath.replace(/[^/]+$/, '');
+    } else {
+      basePath = `${basePath}/`;
+    }
+  }
+  return `${origin}${basePath}api/`;
+}
+
+function apiUrl(path) {
+  if (!apiBase) apiBase = resolveApiBase();
+  const clean = path.replace(/^\/+/, '');
+  return `${apiBase}${clean}`;
+}
+
+function resolveApiBases() {
+  const primary = apiUrl('');
+  const root = `${window.location.origin}/api/`;
+  if (primary === root) return [primary];
+  return [primary, root];
+}
+
+async function apiFetch(path, options) {
+  if (!apiBases) apiBases = resolveApiBases();
+  const clean = path.replace(/^\/+/, '');
+  let lastResponse = null;
+
+  for (const base of apiBases) {
+    try {
+      const response = await fetch(`${base}${clean}`, options);
+      lastResponse = response;
+      if (response.status !== 404 || apiBases.length === 1) {
+        return response;
+      }
+    } catch (err) {
+      lastResponse = null;
+      continue;
+    }
+  }
+
+  if (!lastResponse) {
+    return new Response(null, { status: 503, statusText: 'Service Unavailable' });
+  }
+
+  return lastResponse;
+}
 
 function resetUI() {
   progressSection.hidden = false;
   statusBar.hidden = false;
+  if (errorBanner) {
+    errorBanner.hidden = true;
+    errorBanner.textContent = '';
+  }
   pagesCrawledEl.textContent = '0';
   linksCheckedEl.textContent = '0';
   runStatusEl.textContent = 'running';
@@ -52,13 +110,22 @@ function updateStatusBar(scanned, identified) {
   statusFillEl.style.width = `${percent}%`;
 }
 
+function showError(message) {
+  if (!errorBanner) return;
+  errorBanner.textContent = message;
+  errorBanner.hidden = false;
+}
+
 async function loadLatest() {
-  const response = await fetch('/api/latest');
+  const response = await apiFetch('latest');
   if (!response.ok) {
     hasLatestResults = false;
     resultsSection.hidden = true;
     if (lastRunEl) {
       lastRunEl.textContent = 'Last run: --';
+    }
+    if (response.status !== 404) {
+      showError(`Unable to load latest run (${response.status}).`);
     }
     return;
   }
@@ -169,12 +236,14 @@ function renderResults(results) {
 async function pollRun() {
   if (!currentRunId) return;
 
-  const response = await fetch(`/api/run/${currentRunId}`);
+  const response = await apiFetch(`run/${currentRunId}`);
   if (!response.ok) {
     runStatusEl.textContent = 'Error';
     runBtn.disabled = false;
     clearInterval(pollTimer);
     pollTimer = null;
+    showError(`Run status check failed (${response.status}).`);
+    await loadLatest();
     return;
   }
 
@@ -203,6 +272,7 @@ async function pollRun() {
     clearInterval(pollTimer);
     pollTimer = null;
     runBtn.disabled = false;
+    showError('Run failed. Please try again later.');
   }
 }
 
@@ -212,7 +282,7 @@ form.addEventListener('submit', async (event) => {
   runBtn.disabled = true;
 
   const startUrl = startUrlInput.value.trim();
-  const response = await fetch('/api/run', {
+  const response = await apiFetch('run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ startUrl })
@@ -220,8 +290,15 @@ form.addEventListener('submit', async (event) => {
 
   if (!response.ok) {
     runBtn.disabled = false;
-    const error = await response.json();
-    runStatusEl.textContent = error.error || 'Unable to start run';
+    let errorMessage = 'Unable to start run.';
+    try {
+      const error = await response.json();
+      errorMessage = error.error || errorMessage;
+    } catch (err) {
+      // ignore parsing issues
+    }
+    runStatusEl.textContent = 'Error';
+    showError(errorMessage);
     return;
   }
 
