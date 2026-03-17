@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Contentstack Link Audit</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg"></div>
+    <main class="container">
+      <header class="hero">
+        <p class="eyebrow">Contentstack Web Audit</p>
+        <h1>Broken links and redirect chains, surfaced daily.</h1>
+        <p class="lede">
+          Run a full crawl of contentstack.com, identify 404s, and spotlight multi-hop redirects. Designed for
+          fast audits and clear reporting.
+        </p>
+      </header>
+
+      <section class="card">
+        <form id="run-form">
+          <label for="start-url">Start URL</label>
+          <div class="input-row">
+            <input
+              id="start-url"
+              name="start-url"
+              type="url"
+              placeholder="https://www.contentstack.com"
+              value="https://www.contentstack.com"
+              required
+            />
+            <button type="submit" id="run-btn">Re-run Crawl</button>
+          </div>
+          <p class="hint">Daily crawl runs at 11:00 (server time). Manual runs are full sweeps and can take time.</p>
+          <p class="warning">
+            Warning: Crawls can take several minutes. Avoid running multiple times back-to-back.
+          </p>
+        </form>
+
+        <div class="progress" id="progress" hidden>
+          <div>
+            <span class="label">Pages crawled</span>
+            <span class="value" id="pages-crawled">0</span>
+          </div>
+          <div>
+            <span class="label">Links checked</span>
+            <span class="value" id="links-checked">0</span>
+          </div>
+          <div>
+            <span class="label">Status</span>
+            <span class="value" id="run-status">Idle</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="results" id="results" hidden>
+        <div class="result-header">
+          <div>
+            <h2>404 Broken Links</h2>
+            <p>URLs returning a 404 status code.</p>
+          </div>
+          <span class="pill" id="broken-count">0</span>
+        </div>
+        <div id="broken-list" class="result-list"></div>
+
+        <div class="result-header">
+          <div>
+            <h2>308 Redirects</h2>
+            <p>URLs returning 308 permanent redirects. Multi-hop chains are flagged.</p>
+          </div>
+          <span class="pill" id="redirect-count">0</span>
+        </div>
+        <div id="redirect-list" class="result-list"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Built for daily audits. Configure limits via environment variables.</span>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
