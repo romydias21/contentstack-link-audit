@@ -52,9 +52,24 @@
             <span class="value" id="run-status">Idle</span>
           </div>
         </div>
+
+        <div class="status-bar" id="status-bar" hidden>
+          <div class="status-meta">
+            <span class="label">Docs identified</span>
+            <span class="value" id="docs-identified">0</span>
+          </div>
+          <div class="status-meta">
+            <span class="label">Docs scanned</span>
+            <span class="value" id="docs-scanned">0</span>
+          </div>
+          <div class="status-track" aria-hidden="true">
+            <div class="status-fill" id="status-fill"></div>
+          </div>
+        </div>
       </section>
 
       <section class="results" id="results" hidden>
+        <div class="last-run" id="last-run">Last run: --</div>
         <div class="result-header">
           <div>
             <h2>404 Broken Links</h2>

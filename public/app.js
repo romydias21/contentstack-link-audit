@@ -10,22 +10,81 @@ const redirectCountEl = document.getElementById('redirect-count');
 const brokenListEl = document.getElementById('broken-list');
 const redirectListEl = document.getElementById('redirect-list');
 const runBtn = document.getElementById('run-btn');
+const statusBar = document.getElementById('status-bar');
+const docsIdentifiedEl = document.getElementById('docs-identified');
+const docsScannedEl = document.getElementById('docs-scanned');
+const statusFillEl = document.getElementById('status-fill');
+const lastRunEl = document.getElementById('last-run');
 
 let currentRunId = null;
 let pollTimer = null;
+let hasLatestResults = false;
 
 function resetUI() {
   progressSection.hidden = false;
-  resultsSection.hidden = true;
+  statusBar.hidden = false;
   pagesCrawledEl.textContent = '0';
   linksCheckedEl.textContent = '0';
-  runStatusEl.textContent = 'Starting';
+  runStatusEl.textContent = 'running';
+  docsIdentifiedEl.textContent = '0';
+  docsScannedEl.textContent = '0';
+  statusFillEl.style.width = '0%';
   brokenCountEl.textContent = '0';
   redirectCountEl.textContent = '0';
-  brokenListEl.innerHTML = '';
-  redirectListEl.innerHTML = '';
 }
 
+function formatDateTime(value) {
+  if (!value) return '--';
+  try {
+    return new Date(value).toLocaleString();
+  } catch (err) {
+    return value;
+  }
+}
+
+function updateStatusBar(scanned, identified) {
+  const safeScanned = Number(scanned) || 0;
+  const safeIdentified = Number(identified) || 0;
+  docsIdentifiedEl.textContent = safeIdentified.toString();
+  docsScannedEl.textContent = safeScanned.toString();
+
+  const percent = safeIdentified > 0 ? Math.min(100, (safeScanned / safeIdentified) * 100) : 0;
+  statusFillEl.style.width = `${percent}%`;
+}
+
+async function loadLatest() {
+  const response = await fetch('/api/latest');
+  if (!response.ok) {
+    hasLatestResults = false;
+    resultsSection.hidden = true;
+    if (lastRunEl) {
+      lastRunEl.textContent = 'Last run: --';
+    }
+    return;
+  }
+
+  const payload = await response.json();
+  hasLatestResults = true;
+  resultsSection.hidden = false;
+  renderResults(payload.results);
+
+  const finishedAt = payload.finishedAt || payload.summary?.completedAt;
+  if (lastRunEl) {
+    lastRunEl.textContent = `Last run: ${formatDateTime(finishedAt)}`;
+  }
+
+  const completedPages = payload.summary?.pagesCrawled ?? payload.summary?.pagesDiscovered ?? 0;
+  updateStatusBar(completedPages, completedPages);
+  pagesCrawledEl.textContent = completedPages.toString();
+  linksCheckedEl.textContent = (payload.summary?.linksChecked || 0).toString();
+  runStatusEl.textContent = 'idle';
+
+  brokenCountEl.textContent = (payload.summary?.notFoundCount ?? payload.results?.notFound?.length ?? 0).toString();
+  redirectCountEl.textContent = (payload.summary?.redirect308Count ?? payload.results?.redirect308?.length ?? 0).toString();
+
+  progressSection.hidden = false;
+  statusBar.hidden = false;
+}
 function createResultItem(item, type) {
   const container = document.createElement('div');
   container.className = 'result-item';
@@ -87,14 +146,20 @@ function createResultItem(item, type) {
 }
 
 function renderResults(results) {
-  brokenCountEl.textContent = results.notFound.length;
-  redirectCountEl.textContent = results.redirect308.length;
+  brokenListEl.innerHTML = '';
+  redirectListEl.innerHTML = '';
 
-  results.notFound.forEach((item) => {
+  const notFound = results?.notFound || [];
+  const redirect308 = results?.redirect308 || [];
+
+  brokenCountEl.textContent = notFound.length;
+  redirectCountEl.textContent = redirect308.length;
+
+  notFound.forEach((item) => {
     brokenListEl.appendChild(createResultItem(item, 'broken'));
   });
 
-  results.redirect308.forEach((item) => {
+  redirect308.forEach((item) => {
     redirectListEl.appendChild(createResultItem(item, 'redirect'));
   });
 
@@ -118,15 +183,20 @@ async function pollRun() {
   linksCheckedEl.textContent = data.progress.linksChecked;
   runStatusEl.textContent = data.status;
 
+  const discovered = data.progress.pagesDiscovered || data.progress.pagesCrawled;
+  updateStatusBar(data.progress.pagesCrawled, discovered);
+  if (typeof data.progress.notFoundCount === 'number') {
+    brokenCountEl.textContent = data.progress.notFoundCount;
+  }
+  if (typeof data.progress.redirect308Count === 'number') {
+    redirectCountEl.textContent = data.progress.redirect308Count;
+  }
+
   if (data.status === 'done') {
     clearInterval(pollTimer);
     pollTimer = null;
     runBtn.disabled = false;
-    const resultsResponse = await fetch(`/api/run/${currentRunId}/results`);
-    if (resultsResponse.ok) {
-      const results = await resultsResponse.json();
-      renderResults(results);
-    }
+    await loadLatest();
   }
 
   if (data.status === 'error') {
@@ -160,3 +230,5 @@ form.addEventListener('submit', async (event) => {
   pollTimer = setInterval(pollRun, 2500);
   pollRun();
 });
+
+loadLatest();

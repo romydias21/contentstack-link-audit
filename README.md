@@ -42,8 +42,12 @@ The daily schedule uses the server's local time zone. Set `TZ=Asia/Kolkata` (or 
 - The crawler seeds from `sitemap.xml` when available, then discovers links recursively.
 - External links are checked but **not** crawled.
 - JavaScript rendering uses Playwright (Chromium).
-- Results are stored in memory (MVP). Use a DB for long-term history.
+- The most recent completed run is persisted to `data/last-run.json` and served to all visitors.
 - Reports focus on 404 and 308 responses as requested.
+
+## API
+
+- `GET /api/latest` returns the latest completed run (used to render the page on load).
 
 ## Hosting
 

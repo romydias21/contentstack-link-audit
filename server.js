@@ -1,4 +1,6 @@
 const path = require('path');
+const fs = require('fs');
+const fsp = require('fs/promises');
 const express = require('express');
 const crypto = require('crypto');
 const { runAudit } = require('./lib/crawler');
@@ -7,6 +9,8 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const DEFAULT_START_URL = process.env.DEFAULT_START_URL || 'https://www.contentstack.com';
 const MAX_RUNS = Number(process.env.MAX_RUNS) || 20;
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const LAST_RUN_FILE = path.join(DATA_DIR, 'last-run.json');
 const SCHEDULE_ENABLED = process.env.SCHEDULE_ENABLED !== 'false';
 const SCHEDULE_HOUR = Number(process.env.SCHEDULE_HOUR) || 11;
 const SCHEDULE_MINUTE = Number(process.env.SCHEDULE_MINUTE) || 0;
@@ -21,6 +25,7 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || DEFAULT_START_URL)
 
 const runs = new Map();
 let activeRunId = null;
+let lastCompletedRun = null;
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -46,9 +51,12 @@ function createRun(startUrl, mode) {
     finishedAt: null,
     progress: {
       pagesCrawled: 0,
+      pagesDiscovered: 0,
       pagesQueued: 0,
       linksChecked: 0,
-      linksQueued: 0
+      linksQueued: 0,
+      notFoundCount: 0,
+      redirect308Count: 0
     },
     summary: null,
     results: null,
@@ -61,6 +69,21 @@ function createRun(startUrl, mode) {
     oldest.forEach((key) => runs.delete(key));
   }
   return run;
+}
+
+async function loadLastRun() {
+  try {
+    if (!fs.existsSync(LAST_RUN_FILE)) return null;
+    const data = await fsp.readFile(LAST_RUN_FILE, 'utf-8');
+    return JSON.parse(data);
+  } catch (err) {
+    return null;
+  }
+}
+
+async function saveLastRun(payload) {
+  await fsp.mkdir(DATA_DIR, { recursive: true });
+  await fsp.writeFile(LAST_RUN_FILE, JSON.stringify(payload, null, 2), 'utf-8');
 }
 
 function startRun({ startUrl, mode, configOverrides }) {
@@ -85,6 +108,19 @@ function startRun({ startUrl, mode, configOverrides }) {
       run.finishedAt = new Date().toISOString();
       run.results = results;
       run.summary = results.summary;
+
+      lastCompletedRun = {
+        startUrl,
+        mode,
+        finishedAt: run.finishedAt,
+        summary: results.summary,
+        results
+      };
+      try {
+        await saveLastRun(lastCompletedRun);
+      } catch (err) {
+        console.warn('Failed to persist last run data.', err?.message || err);
+      }
     } catch (err) {
       run.status = 'error';
       run.finishedAt = new Date().toISOString();
@@ -174,6 +210,13 @@ app.get('/api/run/:id', (req, res) => {
   });
 });
 
+app.get('/api/latest', (req, res) => {
+  if (!lastCompletedRun) {
+    return res.status(404).json({ error: 'No completed run yet' });
+  }
+  return res.json(lastCompletedRun);
+});
+
 app.get('/api/run/:id/results', (req, res) => {
   const run = runs.get(req.params.id);
   if (!run) return res.status(404).json({ error: 'Run not found' });
@@ -186,5 +229,14 @@ app.get('/api/run/:id/results', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Link audit app running on http://localhost:${PORT}`);
-  scheduleDailyRun();
+  loadLastRun()
+    .then((data) => {
+      if (data) {
+        lastCompletedRun = data;
+      }
+      scheduleDailyRun();
+    })
+    .catch(() => {
+      scheduleDailyRun();
+    });
 });
