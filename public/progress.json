@@ -1,8 +1,8 @@
 {
-  "status": "idle",
+  "status": "running",
   "startUrl": "https://www.contentstack.com",
-  "startedAt": null,
-  "updatedAt": null,
+  "startedAt": "2026-03-17T11:48:56.091Z",
+  "updatedAt": "2026-03-17T11:48:56.092Z",
   "finishedAt": null,
   "progress": {
     "pagesCrawled": 0,
