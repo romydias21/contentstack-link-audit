@@ -19,60 +19,13 @@
       </header>
 
       <section class="card">
-        <form id="run-form">
-          <label for="start-url">Start URL</label>
-          <div class="input-row">
-            <input
-              id="start-url"
-              name="start-url"
-              type="url"
-              placeholder="https://www.contentstack.com"
-              value="https://www.contentstack.com"
-              required
-            />
-            <button type="submit" id="run-btn">Re-run Crawl</button>
-          </div>
-          <p class="hint">Daily crawl runs at 11:00 IST via GitHub Actions. Manual runs are full sweeps and can take time.</p>
-          <p class="warning">
-            Warning: Crawls can take several minutes. Avoid running multiple times back-to-back.
-          </p>
-        </form>
-
-        <div class="progress" id="progress" hidden>
-          <div>
-            <span class="label">Pages crawled</span>
-            <span class="value" id="pages-crawled">0</span>
-          </div>
-          <div>
-            <span class="label">Links checked</span>
-            <span class="value" id="links-checked">0</span>
-          </div>
-          <div>
-            <span class="label">Status</span>
-            <span class="value" id="run-status">Idle</span>
-          </div>
-        </div>
-
+        <p class="hint">Daily crawl runs at 11:00 IST via GitHub Actions.</p>
+        <p class="hint">This dashboard always shows the latest completed run.</p>
         <div class="error-banner" id="error-banner" hidden></div>
-
-        <div class="status-bar" id="status-bar" hidden>
-          <div class="status-meta">
-            <span class="label">Docs identified</span>
-            <span class="value" id="docs-identified">0</span>
-          </div>
-          <div class="status-meta">
-            <span class="label">Docs scanned</span>
-            <span class="value" id="docs-scanned">0</span>
-          </div>
-          <div class="status-track" aria-hidden="true">
-            <div class="status-fill" id="status-fill"></div>
-          </div>
-        </div>
       </section>
 
       <section class="results" id="results" hidden>
         <div class="last-run" id="last-run">Last run: --</div>
-        <div class="last-run">Counts update live during a run. Lists refresh after the run completes.</div>
         <div class="result-header">
           <div>
             <h2>404 Broken Links</h2>
@@ -94,7 +47,7 @@
     </main>
 
     <footer class="footer">
-      <span>Built for daily audits. Configure limits via environment variables.</span>
+      <span>Built for daily audits. Updated automatically after each run.</span>
     </footer>
 
     <script src="app.js"></script>
