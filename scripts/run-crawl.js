@@ -146,9 +146,7 @@ async function run() {
       error: null
     }, { forceCommit: true });
 
-    if (commitProgress) {
-      commitIfNeeded('chore: update crawl results');
-    }
+    commitIfNeeded('chore: update crawl results');
   } catch (err) {
     await persistProgress({
       status: 'error',

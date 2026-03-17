@@ -44,8 +44,6 @@ jobs:
       - name: Run crawl
         env:
           START_URL: ${{ inputs.start_url }}
-          COMMIT_PROGRESS: 'true'
-          PROGRESS_INTERVAL_SEC: '120'
-          PROGRESS_MIN_DELTA: '25'
+          COMMIT_PROGRESS: 'false'
           RENDER_JS: 'false'
         run: node scripts/run-crawl.js
