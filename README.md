@@ -34,6 +34,7 @@ Set these environment variables as needed:
 - `SCHEDULE_MINUTE` (default: `0`)
 - `SCHEDULE_MAX_PAGES` (default: `MAX_PAGES`)
 - `FULL_SWEEP_MAX_PAGES` (default: `SCHEDULE_MAX_PAGES`)
+- `RENDER_JS` (default: `false`) Set to `true` to enable Playwright rendering.
 
 The daily schedule uses the server's local time zone. Set `TZ=Asia/Kolkata` (or your desired zone) in the host environment to align with 11:00 AM local time.
 
