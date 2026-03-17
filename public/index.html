@@ -32,7 +32,7 @@
             />
             <button type="submit" id="run-btn">Re-run Crawl</button>
           </div>
-          <p class="hint">Daily crawl runs at 11:00 (server time). Manual runs are full sweeps and can take time.</p>
+          <p class="hint">Daily crawl runs at 11:00 IST via GitHub Actions. Manual runs are full sweeps and can take time.</p>
           <p class="warning">
             Warning: Crawls can take several minutes. Avoid running multiple times back-to-back.
           </p>
@@ -72,6 +72,7 @@
 
       <section class="results" id="results" hidden>
         <div class="last-run" id="last-run">Last run: --</div>
+        <div class="last-run">Counts update live during a run. Lists refresh after the run completes.</div>
         <div class="result-header">
           <div>
             <h2>404 Broken Links</h2>

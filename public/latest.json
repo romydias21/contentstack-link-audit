@@ -1,0 +1,22 @@
+{
+  "startUrl": "https://www.contentstack.com",
+  "finishedAt": null,
+  "summary": {
+    "pagesCrawled": 0,
+    "linksChecked": 0,
+    "notFoundCount": 0,
+    "redirect308Count": 0,
+    "completedAt": null
+  },
+  "results": {
+    "summary": {
+      "pagesCrawled": 0,
+      "linksChecked": 0,
+      "notFoundCount": 0,
+      "redirect308Count": 0,
+      "completedAt": null
+    },
+    "notFound": [],
+    "redirect308": []
+  }
+}

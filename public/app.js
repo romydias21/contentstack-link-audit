@@ -17,11 +17,11 @@ const statusFillEl = document.getElementById('status-fill');
 const lastRunEl = document.getElementById('last-run');
 const errorBanner = document.getElementById('error-banner');
 
-let currentRunId = null;
 let pollTimer = null;
-let hasLatestResults = false;
 let apiBase = null;
 let apiBases = null;
+let latestFinishedAtMs = null;
+let pendingRunSince = null;
 
 function resolveApiBase() {
   const origin = window.location.origin;
@@ -49,14 +49,19 @@ function resolveApiBases() {
   return [primary, root];
 }
 
-async function apiFetch(path, options) {
+async function apiFetch(path, options = {}) {
   if (!apiBases) apiBases = resolveApiBases();
   const clean = path.replace(/^\/+/, '');
   let lastResponse = null;
 
+  const mergedOptions = { ...options };
+  if (!mergedOptions.method || mergedOptions.method.toUpperCase() === 'GET') {
+    mergedOptions.cache = 'no-store';
+  }
+
   for (const base of apiBases) {
     try {
-      const response = await fetch(`${base}${clean}`, options);
+      const response = await fetch(`${base}${clean}`, mergedOptions);
       lastResponse = response;
       if (response.status !== 404 || apiBases.length === 1) {
         return response;
@@ -74,23 +79,6 @@ async function apiFetch(path, options) {
   return lastResponse;
 }
 
-function resetUI() {
-  progressSection.hidden = false;
-  statusBar.hidden = false;
-  if (errorBanner) {
-    errorBanner.hidden = true;
-    errorBanner.textContent = '';
-  }
-  pagesCrawledEl.textContent = '0';
-  linksCheckedEl.textContent = '0';
-  runStatusEl.textContent = 'running';
-  docsIdentifiedEl.textContent = '0';
-  docsScannedEl.textContent = '0';
-  statusFillEl.style.width = '0%';
-  brokenCountEl.textContent = '0';
-  redirectCountEl.textContent = '0';
-}
-
 function formatDateTime(value) {
   if (!value) return '--';
   try {
@@ -98,6 +86,12 @@ function formatDateTime(value) {
   } catch (err) {
     return value;
   }
+}
+
+function parseTime(value) {
+  if (!value) return null;
+  const ts = Date.parse(value);
+  return Number.isNaN(ts) ? null : ts;
 }
 
 function updateStatusBar(scanned, identified) {
@@ -116,42 +110,27 @@ function showError(message) {
   errorBanner.hidden = false;
 }
 
-async function loadLatest() {
-  const response = await apiFetch('latest');
-  if (!response.ok) {
-    hasLatestResults = false;
-    resultsSection.hidden = true;
-    if (lastRunEl) {
-      lastRunEl.textContent = 'Last run: --';
-    }
-    if (response.status !== 404) {
-      showError(`Unable to load latest run (${response.status}).`);
-    }
-    return;
-  }
+function clearError() {
+  if (!errorBanner) return;
+  errorBanner.hidden = true;
+  errorBanner.textContent = '';
+}
 
-  const payload = await response.json();
-  hasLatestResults = true;
-  resultsSection.hidden = false;
-  renderResults(payload.results);
-
-  const finishedAt = payload.finishedAt || payload.summary?.completedAt;
-  if (lastRunEl) {
-    lastRunEl.textContent = `Last run: ${formatDateTime(finishedAt)}`;
-  }
-
-  const completedPages = payload.summary?.pagesCrawled ?? payload.summary?.pagesDiscovered ?? 0;
-  updateStatusBar(completedPages, completedPages);
-  pagesCrawledEl.textContent = completedPages.toString();
-  linksCheckedEl.textContent = (payload.summary?.linksChecked || 0).toString();
-  runStatusEl.textContent = 'idle';
-
-  brokenCountEl.textContent = (payload.summary?.notFoundCount ?? payload.results?.notFound?.length ?? 0).toString();
-  redirectCountEl.textContent = (payload.summary?.redirect308Count ?? payload.results?.redirect308?.length ?? 0).toString();
-
+function setProgressVisible() {
   progressSection.hidden = false;
   statusBar.hidden = false;
 }
+
+function setStatus(text) {
+  runStatusEl.textContent = text;
+}
+
+function resetProgressValues() {
+  pagesCrawledEl.textContent = '0';
+  linksCheckedEl.textContent = '0';
+  updateStatusBar(0, 0);
+}
+
 function createResultItem(item, type) {
   const container = document.createElement('div');
   container.className = 'result-item';
@@ -165,7 +144,7 @@ function createResultItem(item, type) {
   const statusText = `Status: ${item.finalStatus || 'ERR'}`;
   const finalText = item.finalUrl ? `Final: ${item.finalUrl}` : '';
 
-  meta.textContent = [statusText, finalText].filter(Boolean).join(' • ');
+  meta.textContent = [statusText, finalText].filter(Boolean).join(' | ');
 
   if (type === 'redirect' && item.chain && item.chain.length > 1) {
     const badge = document.createElement('span');
@@ -181,7 +160,7 @@ function createResultItem(item, type) {
     const chainEl = document.createElement('div');
     chainEl.className = 'redirect-chain';
     chainEl.textContent = item.chain
-      .map((step) => `${step.url} → ${step.location} (${step.status})`)
+      .map((step) => `${step.url} -> ${step.location} (${step.status})`)
       .join(' | ');
     container.appendChild(chainEl);
   }
@@ -233,55 +212,139 @@ function renderResults(results) {
   resultsSection.hidden = false;
 }
 
-async function pollRun() {
-  if (!currentRunId) return;
-
-  const response = await apiFetch(`run/${currentRunId}`);
+async function loadLatest() {
+  const response = await apiFetch('latest');
   if (!response.ok) {
-    runStatusEl.textContent = 'Error';
-    runBtn.disabled = false;
+    resultsSection.hidden = true;
+    if (lastRunEl) {
+      lastRunEl.textContent = 'Last run: --';
+    }
+    if (response.status !== 404) {
+      showError(`Unable to load latest run (${response.status}).`);
+    }
+    latestFinishedAtMs = null;
+    return;
+  }
+
+  const payload = await response.json();
+  resultsSection.hidden = false;
+  renderResults(payload.results || {});
+
+  const finishedAt = payload.finishedAt || payload.summary?.completedAt;
+  latestFinishedAtMs = parseTime(finishedAt);
+  if (lastRunEl) {
+    lastRunEl.textContent = `Last run: ${formatDateTime(finishedAt)}`;
+  }
+
+  const completedPages = payload.summary?.pagesCrawled ?? payload.summary?.pagesDiscovered ?? 0;
+  updateStatusBar(completedPages, completedPages);
+  pagesCrawledEl.textContent = completedPages.toString();
+  linksCheckedEl.textContent = (payload.summary?.linksChecked || 0).toString();
+
+  brokenCountEl.textContent = (payload.summary?.notFoundCount ?? payload.results?.notFound?.length ?? 0).toString();
+  redirectCountEl.textContent = (payload.summary?.redirect308Count ?? payload.results?.redirect308?.length ?? 0).toString();
+
+  setProgressVisible();
+  setStatus('idle');
+}
+
+function isFreshProgress(data) {
+  if (!pendingRunSince) return true;
+  const ts = parseTime(data.updatedAt) || parseTime(data.finishedAt) || parseTime(data.startedAt);
+  if (!ts) return false;
+  return ts >= pendingRunSince - 1000;
+}
+
+function applyProgress(data) {
+  const progress = data.progress || {};
+  const pagesCrawled = progress.pagesCrawled || 0;
+  const pagesDiscovered = progress.pagesDiscovered ?? pagesCrawled;
+
+  pagesCrawledEl.textContent = pagesCrawled.toString();
+  linksCheckedEl.textContent = (progress.linksChecked || 0).toString();
+  updateStatusBar(pagesCrawled, pagesDiscovered);
+  setStatus(data.status || 'running');
+
+  if (typeof progress.notFoundCount === 'number') {
+    brokenCountEl.textContent = progress.notFoundCount.toString();
+  }
+  if (typeof progress.redirect308Count === 'number') {
+    redirectCountEl.textContent = progress.redirect308Count.toString();
+  }
+}
+
+function stopPolling() {
+  if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
-    showError(`Run status check failed (${response.status}).`);
-    await loadLatest();
+  }
+}
+
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(pollProgress, 3000);
+}
+
+async function pollProgress() {
+  const response = await apiFetch('progress');
+  if (!response.ok) {
+    if (response.status === 404 && pendingRunSince) {
+      setStatus('queued');
+      return;
+    }
+    if (response.status !== 404) {
+      showError(`Progress check failed (${response.status}).`);
+    }
+    stopPolling();
+    runBtn.disabled = false;
     return;
   }
 
   const data = await response.json();
-  pagesCrawledEl.textContent = data.progress.pagesCrawled;
-  linksCheckedEl.textContent = data.progress.linksChecked;
-  runStatusEl.textContent = data.status;
+  setProgressVisible();
 
-  const discovered = data.progress.pagesDiscovered || data.progress.pagesCrawled;
-  updateStatusBar(data.progress.pagesCrawled, discovered);
-  if (typeof data.progress.notFoundCount === 'number') {
-    brokenCountEl.textContent = data.progress.notFoundCount;
+  if (pendingRunSince && !isFreshProgress(data)) {
+    setStatus('queued');
+    return;
   }
-  if (typeof data.progress.redirect308Count === 'number') {
-    redirectCountEl.textContent = data.progress.redirect308Count;
+
+  clearError();
+  applyProgress(data);
+  if (data.status === 'running' || data.status === 'queued') {
+    runBtn.disabled = true;
   }
 
   if (data.status === 'done') {
-    clearInterval(pollTimer);
-    pollTimer = null;
+    pendingRunSince = null;
     runBtn.disabled = false;
-    await loadLatest();
+    stopPolling();
+
+    const finishedAt = parseTime(data.finishedAt);
+    if (!latestFinishedAtMs || (finishedAt && finishedAt > latestFinishedAtMs)) {
+      await loadLatest();
+    }
+    setStatus('idle');
   }
 
   if (data.status === 'error') {
-    clearInterval(pollTimer);
-    pollTimer = null;
+    pendingRunSince = null;
     runBtn.disabled = false;
-    showError('Run failed. Please try again later.');
+    stopPolling();
+    showError(data.error || 'Run failed. Please try again later.');
   }
 }
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  resetUI();
+  clearError();
   runBtn.disabled = true;
 
   const startUrl = startUrlInput.value.trim();
+  setProgressVisible();
+  setStatus('queued');
+  resetProgressValues();
+  pendingRunSince = Date.now();
+
   const response = await apiFetch('run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -290,6 +353,7 @@ form.addEventListener('submit', async (event) => {
 
   if (!response.ok) {
     runBtn.disabled = false;
+    pendingRunSince = null;
     let errorMessage = 'Unable to start run.';
     try {
       const error = await response.json();
@@ -297,15 +361,27 @@ form.addEventListener('submit', async (event) => {
     } catch (err) {
       // ignore parsing issues
     }
-    runStatusEl.textContent = 'Error';
+    setStatus('error');
     showError(errorMessage);
     return;
   }
 
-  const data = await response.json();
-  currentRunId = data.runId;
-  pollTimer = setInterval(pollRun, 2500);
-  pollRun();
+  startPolling();
+  pollProgress();
 });
 
-loadLatest();
+async function bootstrap() {
+  await loadLatest();
+
+  const progressResponse = await apiFetch('progress');
+  if (progressResponse.ok) {
+    const progressData = await progressResponse.json();
+    if (progressData.status === 'running' || progressData.status === 'queued') {
+      applyProgress(progressData);
+      runBtn.disabled = true;
+      startPolling();
+    }
+  }
+}
+
+bootstrap();

@@ -1,0 +1,51 @@
+name: Daily Link Audit
+
+on:
+  schedule:
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+    inputs:
+      start_url:
+        description: 'Start URL for the crawl'
+        required: false
+        default: 'https://www.contentstack.com'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: link-audit
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+      - name: Configure git
+        run: |
+          git config user.name "contentstack-link-audit[bot]"
+          git config user.email "contentstack-link-audit[bot]@users.noreply.github.com"
+
+      - name: Run crawl
+        env:
+          START_URL: ${{ inputs.start_url }}
+          COMMIT_PROGRESS: 'true'
+          PROGRESS_INTERVAL_SEC: '120'
+          PROGRESS_MIN_DELTA: '25'
+          RENDER_JS: 'false'
+        run: node scripts/run-crawl.js

@@ -1,0 +1,15 @@
+{
+  "status": "idle",
+  "startUrl": "https://www.contentstack.com",
+  "startedAt": null,
+  "updatedAt": null,
+  "finishedAt": null,
+  "progress": {
+    "pagesCrawled": 0,
+    "pagesDiscovered": 0,
+    "linksChecked": 0,
+    "notFoundCount": 0,
+    "redirect308Count": 0
+  },
+  "error": null
+}

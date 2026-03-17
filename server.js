@@ -1,31 +1,25 @@
 const path = require('path');
-const fs = require('fs');
-const fsp = require('fs/promises');
+const fs = require('fs/promises');
 const express = require('express');
-const crypto = require('crypto');
-const { runAudit } = require('./lib/crawler');
+const { fetch } = require('undici');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const DEFAULT_START_URL = process.env.DEFAULT_START_URL || 'https://www.contentstack.com';
-const MAX_RUNS = Number(process.env.MAX_RUNS) || 20;
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const LAST_RUN_FILE = path.join(DATA_DIR, 'last-run.json');
-const SCHEDULE_ENABLED = process.env.SCHEDULE_ENABLED !== 'false';
-const SCHEDULE_HOUR = Number(process.env.SCHEDULE_HOUR) || 11;
-const SCHEDULE_MINUTE = Number(process.env.SCHEDULE_MINUTE) || 0;
-
-const DEFAULT_MAX_PAGES = Number(process.env.MAX_PAGES) || 20000;
-const SCHEDULE_MAX_PAGES = Number(process.env.SCHEDULE_MAX_PAGES) || DEFAULT_MAX_PAGES;
-const FULL_SWEEP_MAX_PAGES = Number(process.env.FULL_SWEEP_MAX_PAGES) || SCHEDULE_MAX_PAGES;
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || DEFAULT_START_URL)
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean);
 
-const runs = new Map();
-let activeRunId = null;
-let lastCompletedRun = null;
+const DATA_BASE_URL = process.env.DATA_BASE_URL || '';
+const LATEST_FILE = path.join(__dirname, 'public', 'latest.json');
+const PROGRESS_FILE = path.join(__dirname, 'public', 'progress.json');
+
+const GITHUB_OWNER = process.env.GITHUB_OWNER;
+const GITHUB_REPO = process.env.GITHUB_REPO;
+const GITHUB_WORKFLOW_ID = process.env.GITHUB_WORKFLOW_ID || 'crawl.yml';
+const GITHUB_REF = process.env.GITHUB_REF || 'main';
+const GITHUB_TOKEN = process.env.GITHUB_DISPATCH_TOKEN || process.env.GITHUB_TOKEN;
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -40,133 +34,67 @@ function isAllowedStartUrl(startUrl) {
   }
 }
 
-function createRun(startUrl, mode) {
-  const runId = crypto.randomUUID();
-  const run = {
-    id: runId,
-    startUrl,
-    mode,
-    status: 'running',
-    createdAt: new Date().toISOString(),
-    finishedAt: null,
-    progress: {
-      pagesCrawled: 0,
-      pagesDiscovered: 0,
-      pagesQueued: 0,
-      linksChecked: 0,
-      linksQueued: 0,
-      notFoundCount: 0,
-      redirect308Count: 0
-    },
-    summary: null,
-    results: null,
-    error: null
-  };
-
-  runs.set(runId, run);
-  if (runs.size > MAX_RUNS) {
-    const oldest = Array.from(runs.keys()).slice(0, runs.size - MAX_RUNS);
-    oldest.forEach((key) => runs.delete(key));
-  }
-  return run;
+function normalizeBaseUrl(value) {
+  if (!value) return '';
+  return value.endsWith('/') ? value : `${value}/`;
 }
 
-async function loadLastRun() {
+async function readJsonFile(filePath) {
   try {
-    if (!fs.existsSync(LAST_RUN_FILE)) return null;
-    const data = await fsp.readFile(LAST_RUN_FILE, 'utf-8');
+    const data = await fs.readFile(filePath, 'utf-8');
     return JSON.parse(data);
   } catch (err) {
     return null;
   }
 }
 
-async function saveLastRun(payload) {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  await fsp.writeFile(LAST_RUN_FILE, JSON.stringify(payload, null, 2), 'utf-8');
-}
+async function fetchRemoteJson(fileName) {
+  if (!DATA_BASE_URL) return null;
+  const base = normalizeBaseUrl(DATA_BASE_URL);
+  const cacheBust = `?t=${Date.now()}`;
+  const url = `${base}${fileName}${cacheBust}`;
 
-function startRun({ startUrl, mode, configOverrides }) {
-  if (activeRunId && runs.get(activeRunId)?.status === 'running') {
-    return { error: 'A crawl is already running. Please wait for it to finish.' };
-  }
-
-  const run = createRun(startUrl, mode);
-  activeRunId = run.id;
-
-  setImmediate(async () => {
-    try {
-      const results = await runAudit({
-        startUrl,
-        configOverrides,
-        onProgress: (progress) => {
-          run.progress = progress;
-        }
-      });
-
-      run.status = 'done';
-      run.finishedAt = new Date().toISOString();
-      run.results = results;
-      run.summary = results.summary;
-
-      lastCompletedRun = {
-        startUrl,
-        mode,
-        finishedAt: run.finishedAt,
-        summary: results.summary,
-        results
-      };
-      try {
-        await saveLastRun(lastCompletedRun);
-      } catch (err) {
-        console.warn('Failed to persist last run data.', err?.message || err);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'ContentstackLinkAudit/1.0',
+        'Cache-Control': 'no-cache'
       }
-    } catch (err) {
-      run.status = 'error';
-      run.finishedAt = new Date().toISOString();
-      run.error = err?.message || 'Unknown error';
-    } finally {
-      if (activeRunId === run.id) {
-        activeRunId = null;
-      }
-    }
-  });
-
-  return { run };
-}
-
-function getNextRunDelayMs() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(SCHEDULE_HOUR, SCHEDULE_MINUTE, 0, 0);
-  if (next <= now) {
-    next.setDate(next.getDate() + 1);
-  }
-  return next.getTime() - now.getTime();
-}
-
-function scheduleDailyRun() {
-  if (!SCHEDULE_ENABLED) return;
-  const delay = getNextRunDelayMs();
-  setTimeout(() => {
-    const outcome = startRun({
-      startUrl: DEFAULT_START_URL,
-      mode: 'scheduled',
-      configOverrides: { maxPages: SCHEDULE_MAX_PAGES }
     });
 
-    if (outcome.error) {
-      console.log(`[scheduler] Skipped run: ${outcome.error}`);
-    } else {
-      console.log(`[scheduler] Started daily crawl for ${DEFAULT_START_URL}`);
-    }
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (err) {
+    return null;
+  }
+}
 
-    scheduleDailyRun();
-  }, delay);
+async function loadJson(fileName, fallbackPath) {
+  const remote = await fetchRemoteJson(fileName);
+  if (remote) return remote;
+  return readJsonFile(fallbackPath);
 }
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+app.get('/api/latest', async (req, res) => {
+  const payload = await loadJson('latest.json', LATEST_FILE);
+  if (!payload) {
+    return res.status(404).json({ error: 'No completed run yet' });
+  }
+  res.set('Cache-Control', 'no-store');
+  return res.json(payload);
+});
+
+app.get('/api/progress', async (req, res) => {
+  const payload = await loadJson('progress.json', PROGRESS_FILE);
+  if (!payload) {
+    return res.status(404).json({ error: 'No progress data yet' });
+  }
+  res.set('Cache-Control', 'no-store');
+  return res.json(payload);
 });
 
 app.post('/api/run', async (req, res) => {
@@ -180,63 +108,44 @@ app.post('/api/run', async (req, res) => {
     });
   }
 
-  const outcome = startRun({
-    startUrl,
-    mode: 'manual',
-    configOverrides: { maxPages: FULL_SWEEP_MAX_PAGES }
-  });
-
-  if (outcome.error) {
-    return res.status(409).json({ error: outcome.error });
+  if (!GITHUB_OWNER || !GITHUB_REPO || !GITHUB_WORKFLOW_ID || !GITHUB_TOKEN) {
+    return res.status(501).json({
+      error: 'Manual runs are disabled. Configure GitHub dispatch settings to enable.'
+    });
   }
 
-  return res.json({ runId: outcome.run.id });
-});
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${GITHUB_WORKFLOW_ID}/dispatches`;
 
-app.get('/api/run/:id', (req, res) => {
-  const run = runs.get(req.params.id);
-  if (!run) return res.status(404).json({ error: 'Run not found' });
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'ContentstackLinkAudit/1.0',
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        'X-GitHub-Api-Version': '2022-11-28'
+      },
+      body: JSON.stringify({
+        ref: GITHUB_REF,
+        inputs: {
+          start_url: startUrl
+        }
+      })
+    });
 
-  res.json({
-    id: run.id,
-    startUrl: run.startUrl,
-    mode: run.mode,
-    status: run.status,
-    createdAt: run.createdAt,
-    finishedAt: run.finishedAt,
-    progress: run.progress,
-    summary: run.summary,
-    error: run.error
-  });
-});
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(response.status).json({
+        error: `GitHub dispatch failed (${response.status}). ${errorText}`
+      });
+    }
 
-app.get('/api/latest', (req, res) => {
-  if (!lastCompletedRun) {
-    return res.status(404).json({ error: 'No completed run yet' });
+    return res.status(202).json({ status: 'queued' });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || 'Failed to dispatch workflow.' });
   }
-  return res.json(lastCompletedRun);
-});
-
-app.get('/api/run/:id/results', (req, res) => {
-  const run = runs.get(req.params.id);
-  if (!run) return res.status(404).json({ error: 'Run not found' });
-  if (run.status !== 'done') {
-    return res.status(409).json({ error: 'Run not complete yet' });
-  }
-
-  res.json(run.results);
 });
 
 app.listen(PORT, () => {
   console.log(`Link audit app running on http://localhost:${PORT}`);
-  loadLastRun()
-    .then((data) => {
-      if (data) {
-        lastCompletedRun = data;
-      }
-      scheduleDailyRun();
-    })
-    .catch(() => {
-      scheduleDailyRun();
-    });
 });

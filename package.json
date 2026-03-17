@@ -5,7 +5,8 @@
   "description": "Crawl a site, detect broken links and redirects",
   "scripts": {
     "dev": "node server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "crawl": "node scripts/run-crawl.js"
   },
   "dependencies": {
     "cheerio": "^1.0.0-rc.12",
