@@ -1,15 +1,15 @@
 {
   "status": "done",
   "startUrl": "https://www.contentstack.com",
-  "startedAt": "2026-10-26T11:21:22.913Z",
-  "updatedAt": "2026-10-26T11:33:37.609Z",
-  "finishedAt": "2026-10-26T11:33:37.604Z",
+  "startedAt": "2026-10-27T10:45:53.032Z",
+  "updatedAt": "2026-10-27T10:58:31.716Z",
+  "finishedAt": "2026-10-27T10:58:31.711Z",
   "progress": {
-    "pagesCrawled": 5431,
-    "pagesDiscovered": 5431,
-    "linksChecked": 8186,
-    "notFoundCount": 303,
-    "redirect308Count": 577
+    "pagesCrawled": 5427,
+    "pagesDiscovered": 5427,
+    "linksChecked": 8181,
+    "notFoundCount": 305,
+    "redirect308Count": 574
   },
   "error": null
 }
